@@ -1,0 +1,100 @@
+use std::crypto::sha256;
+
+type Sha256Digest = [bool; 256];
+
+struct Leaf {
+    pub_key: u16,
+    balance: u128,
+}
+
+fn append(one: Sha256Digest, two: Sha256Digest) -> Sha256Digest {
+    let mut data = [false; 512];
+    data[0..256] = one;
+    data[256..512] = two[0..256];
+    sha256(data)
+}
+
+fn leaf_hash(leaf: Leaf) -> Sha256Digest {
+    let pk_bits = std::convert::to_bits(leaf.pub_key);
+    let pk_pads = std::array::pad(pk_bits, 256, false);
+    let blc_bits = std::convert::to_bits(leaf.balance);
+    let blc_pads = std::array::pad(blc_bits, 512, false);
+    // let one = sha256(pk_pads);
+    // let two = sha256(blc_pads);
+    
+    let mut data = [false; 768];
+    for i in 0 as u16..768 {
+        data[i] = if i < 256 {
+            pk_pads[i]
+        } else {
+            blc_pads[i - 256]
+        };
+    }
+    sha256(data)    
+}
+
+// fn convert_node_to_sha256(addr: u16) -> Sha256Digest {
+//     let bits = std::convert::to_bits(addr);
+//     let bits_padded = std::array::pad(bits, 256, false);
+//     sha256(bits_padded)
+// }
+
+fn generate_account(from: u16, to: u16, balance_list: [u128; 8], amount: u128) -> [u128; 8] {
+    let mut ret = [0 as u128; 8];
+    for i in 0 as u16..8 {
+        if i == from {
+            assert!(balance_list[i] >= amount);
+            ret[i] = balance_list[i] - amount;
+        };
+        
+        if i == to {
+            ret[i] = balance_list[i] + amount;
+        }; 
+        
+        if i != from && i != to {
+            ret[i] = balance_list[i];
+        };
+    }
+    ret
+}
+
+fn generate_merkle_leaves(accounts: [u128; 8]) -> [Sha256Digest; 8] {
+    let mut ret = [[false; 256]; 8];
+    for i in 0 as u16..8 {
+        let leaf = Leaf {
+            pub_key: i,
+            balance: accounts[i],
+        };
+        ret[i] = leaf_hash(leaf);
+    }
+    ret
+}
+
+fn merkle_node_hash(left: Sha256Digest, right: Sha256Digest) -> Sha256Digest {
+    let mut data = [false; 512];
+
+    for i in 0 as u16..256 {
+        data[i] = left[i];
+        data[256 + i] = right[i];
+    }
+
+    sha256(data)
+}
+
+// fn cal_root_hash(data: [Sha256Digest; 4]) -> Sha256Digest {
+//     let left = merkle_node_hash(data[0], data[1]);
+//     let right = merkle_node_hash(data[2], data[3]);
+//     merkle_node_hash(left, right)
+// }
+
+fn restore_root_hash(
+    path: [Sha256Digest; 8],
+) -> Sha256Digest {
+    let n_3 = merkle_node_hash(path[0], path[1]);
+    let n_4 = merkle_node_hash(path[2], path[3]);
+    let n_5 = merkle_node_hash(path[4], path[5]);
+    let n_6 = merkle_node_hash(path[6], path[7]);
+    let n_1 = merkle_node_hash(n_3, n_4);
+    let n_2 = merkle_node_hash(n_5, n_6);
+    merkle_node_hash(n_1, n_2)
+}
