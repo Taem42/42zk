@@ -1,0 +1,40 @@
+//!
+//! The '42zk' main module.
+//!
+
+use std::crypto::sha256;
+
+type Sha256Digest = [bool; 256];
+
+struct PublicInput {
+    inputHash: Sha256Digest,
+    outputHash: Sha256Digest,
+}
+
+fn main(inputAmount: u128, inputNonce: u128, outputAmount: u128, outputNonce: u128) -> PublicInput {
+    assert!(inputAmount >= outputAmount);
+    let inputAmountBits = std::convert::to_bits(inputAmount);
+    let inputNonceBits = std::convert::to_bits(inputNonce);
+    let outputAmountBits = std::convert::to_bits(outputAmount);
+    let outputNonceBits = std::convert::to_bits(outputNonce);
+
+    let mut inputData = [false; 256];
+    for i in 0 as u8..128 {
+        inputData[i] = inputAmountBits[i];
+        inputData[128 + i] = inputNonceBits[i];
+    }
+
+    let mut outputData = [false; 256];
+    for i in 0 as u8..128 {
+        outputData[i] = outputAmountBits[i];
+        outputData[128 + i] = outputNonceBits[i];
+    }
+
+    let inputHash = sha256(inputData);
+    let outputHash = sha256(outputData);
+
+    PublicInput {
+        inputHash: inputHash,
+        outputHash: outputHash,
+    }
+}
