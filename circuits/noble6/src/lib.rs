@@ -3,6 +3,7 @@ use halo::{
     Ec1, Field, LinearCombination, Params, RecursiveCircuit, RecursiveProof, SynthesisError,
     UInt64,
 };
+use sha2::{Digest, Sha256};
 
 fn lc_from_bits<F: Field, CS: ConstraintSystem<F>>(bits: &[Boolean]) -> LinearCombination<F> {
     let mut lc = LinearCombination::zero();
@@ -75,9 +76,10 @@ impl Transaction {
     }
 }
 
+#[derive(Debug)]
 struct ChainState {
     height: u64,
-    root_hash: [u8; 32],
+    root_hash: Vec<u8>,
     balances: [u128; 8],
     tx: Option<Transaction>,
 }
@@ -104,6 +106,63 @@ impl ChainState {
             .map(|byte| (0..8).map(move |i| (byte >> i) & 1u8 == 1u8))
             .flatten()
             .collect()
+    }
+
+    fn hash_two(left: &Vec<u8>, right: &Vec<u8>) -> Vec<u8> {
+        let mut combined = left.clone();
+        combined.extend(right.clone());
+
+        Sha256::digest(&combined).to_vec()
+    }
+
+    fn merkle_root_hash(&self) -> Vec<u8> {
+        let leaf_hashes = self
+            .balances
+            .iter()
+            .map(|balance| Sha256::digest(balance.to_le_bytes().as_ref()).to_vec())
+            .collect::<Vec<_>>();
+
+        let mut root_hash = leaf_hashes;
+        while root_hash.len() > 1 {
+            root_hash = root_hash
+                .chunks(2)
+                .map(|left_right| Self::hash_two(&left_right[0], &left_right[1]))
+                .collect::<Vec<_>>();
+        }
+
+        root_hash.pop().expect("root hash")
+    }
+
+    fn genesis() -> Self {
+        ChainState {
+            height: 0,
+            root_hash: vec![],
+            balances: [0u128; 8],
+            tx: None,
+        }
+    }
+
+    fn apply_tx(&self, tx: Transaction) -> Self {
+        let mut balances = self.balances.clone();
+        if tx.to == tx.from {
+            // Mint
+            balances[tx.to as usize] += tx.amount;
+        } else {
+            // Transfer
+            // FIXME: overflow
+            balances[tx.from as usize] -= tx.amount;
+            balances[tx.to as usize] += tx.amount;
+        }
+
+        let mut new_state = ChainState {
+            height: self.height + 1,
+            root_hash: vec![],
+            balances,
+            tx: Some(tx),
+        };
+
+        new_state.root_hash = new_state.merkle_root_hash();
+        new_state
     }
 
     #[cfg(test)]
@@ -254,14 +313,7 @@ struct ReachCircuit;
 
 impl<F: Field> RecursiveCircuit<F> for ReachCircuit {
     fn base_payload(&self) -> Vec<bool> {
-        let genesis = ChainState {
-            height: 0,
-            root_hash: [0u8; 32],
-            balances: [0u128; 8],
-            tx: None,
-        };
-
-        genesis.to_bits()
+        ChainState::genesis().to_bits()
     }
 
     fn synthesize<CS: ConstraintSystem<F>>(
@@ -316,5 +368,37 @@ impl<F: Field> RecursiveCircuit<F> for ReachCircuit {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::time::Instant;
+
+    #[test]
+    fn basic_test() {
+        let start = Instant::now();
+        let params0: Params<Ec0> = Params::new(22);
+        let params1: Params<Ec1> = Params::new(22);
+        println!("done, took {:?}", start.elapsed());
+
+        let genesis = ChainState::genesis();
+        let txs = vec![
+            Transaction {
+                from: 0,
+                to: 0,
+                amount: 500,
+            },
+            Transaction {
+                from: 0,
+                to: 1,
+                amount: 100,
+            },
+        ];
+
+        let circuit = ReachCircuit;
+        // RecursiveProof::<Ec1, Ec0>::create_proof(&params1, &params0, None, &circuit, &);
     }
 }
