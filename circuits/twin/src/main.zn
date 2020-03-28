@@ -1,0 +1,42 @@
+//!
+//! The 'twin' main module.
+//!
+
+use std::crypto::sha256;
+
+type Sha256Digest = [bool; 256];
+
+struct PublicInput {
+  input_amount_hash: Sha256Digest,
+  output_amount_hash: Sha256Digest,
+}
+
+fn hash_amount(amount: u128, nonce: u128) -> Sha256Digest {
+  let amount_bits = std::convert::to_bits(amount); // [bool; 128]
+  let nonce_bits = std::convert::to_bits(nonce); // [bool; 128]
+  let mut preimage = [false; 256];
+
+  for i in 0 as u128..128 {
+    preimage[i] = amount_bits[i];
+    preimage[128 as u128 + i] = nonce_bits[i];
+  }
+
+  std::crypto::sha256(preimage)
+}
+
+fn main(
+  input_amount: u128,
+  input_nonce: u128,
+  output_amount: u128,
+  output_nonce: u128
+) -> PublicInput {
+  assert!(input_amount >= output_amount);
+
+  let input_amount_hash = hash_amount(input_amount, input_nonce);
+  let output_amount_hash = hash_amount(output_amount, output_nonce);
+
+  PublicInput {
+    input_amount_hash: input_amount_hash,
+    output_amount_hash: output_amount_hash,
+  }
+}

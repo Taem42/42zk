@@ -1,0 +1,36 @@
+//!
+//! The '42zk' main module.
+//!
+
+mod merkle;
+
+use std::crypto::sha256;
+
+type Sha256Digest = [bool; 256];
+
+struct PublicInput {
+    root_hash: merkle::Sha256Digest, 
+}
+
+
+fn main(
+    from: u16,
+    to: u16,
+    amount: u128,
+    balance_list: [u128; 8],
+    merkle_path: [Sha256Digest; 8]
+) -> PublicInput {
+    assert!(from < 8 as u16);
+    assert!(to < 8 as u16);
+
+    let accounts = merkle::generate_account(from, to, balance_list, amount);
+    let merkle_leaves = merkle::generate_merkle_leaves(accounts);
+
+    let root_hash = merkle::restore_root_hash(
+      merkle_leaves,
+    );
+
+    PublicInput {
+      root_hash: root_hash,
+    }
+}

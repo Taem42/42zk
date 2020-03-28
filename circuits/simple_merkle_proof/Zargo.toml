@@ -1,0 +1,3 @@
+[circuit]
+name = "simple_merkle_proof"
+version = "0.1.0"
