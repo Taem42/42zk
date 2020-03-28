@@ -10,7 +10,9 @@ crate-type = ["cdylib", "staticlib"]
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+argparse = "0.2"
 bellman = "0.6.0"
 pairing = "0.16.0"
 rand = "0.7.3"
 sha2 = "0.8.1"
+hex = "*"

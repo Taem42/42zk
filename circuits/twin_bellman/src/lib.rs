@@ -141,8 +141,8 @@ pub fn generate_proof(witness: Witness, params: &Vec<u8>) -> Proof {
 }
 
 pub struct Input {
-    from_hash: Vec<u8>,
-    to_hash: Vec<u8>,
+    pub from_hash: Vec<u8>,
+    pub to_hash: Vec<u8>,
 }
 
 struct VerifyingKey(groth16::VerifyingKey<Bls12>);
