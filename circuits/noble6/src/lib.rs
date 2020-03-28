@@ -40,6 +40,20 @@ fn bits_to_num<F: Field, CS: ConstraintSystem<F>>(
     Ok(num)
 }
 
+fn enforce_equality<F: Field, CS: ConstraintSystem<F>>(mut cs: CS, a: &[Boolean], b: &[Boolean]) {
+    assert_eq!(a.len(), b.len());
+
+    let mut a_lc = LinearCombination::zero();
+    let mut b_lc = LinearCombination::zero();
+    let mut coeff = Coeff::One;
+    for (a_bit, b_bit) in a.into_iter().zip(b.into_iter()) {
+        a_lc = a_lc + &a_bit.lc(CS::ONE, coeff);
+        b_lc = b_lc + &b_bit.lc(CS::ONE, coeff);
+        coeff = coeff.double();
+    }
+    cs.enforce_zero(a_lc - &b_lc);
+}
+
 #[derive(Debug, Clone, Copy)]
 struct Transaction {
     from: u16,
@@ -92,24 +106,24 @@ impl ChainState {
             .collect()
     }
 
+    #[cfg(test)]
     fn alloc_bits<F: Field, CS: ConstraintSystem<F>>(
         self,
         mut cs: CS,
-    ) -> Result<Vec<Boolean>, SynthesisError> {
+    ) -> Result<Vec<AllocatedBit>, SynthesisError> {
         self.to_bits()
             .into_iter()
             .enumerate()
             .map(|(i, b)| {
                 AllocatedBit::alloc(cs.namespace(|| format!("input bit {}", i)), || Ok(b))
             })
-            .map(|b| b.map(Boolean::from))
             .collect::<Result<Vec<_>, _>>()
     }
 }
 
 struct CTransaction<F: Field> {
-    from: AllocatedNum<F>,   // 16
-    to: AllocatedNum<F>,     // 16
+    from: u16,               // 16
+    to: u16,                 // 16
     amount: AllocatedNum<F>, // 128
 }
 
@@ -118,8 +132,34 @@ impl<F: Field> CTransaction<F> {
         mut cs: CS,
         bits: &[Boolean],
     ) -> Result<Self, SynthesisError> {
-        let from = bits_to_num(cs.namespace(|| "tx from"), &bits[0..16])?;
-        let to = bits_to_num(cs.namespace(|| "tx to"), &bits[16..32])?;
+        if bits.len() != 8 * (4 + 16) {
+            return Err(SynthesisError::Unsatisfiable);
+        }
+
+        let convert_to_num = |bits: &[Boolean]| -> Result<_, _> {
+            let num = bits
+                .iter()
+                .map(|b| b.get_value())
+                .enumerate()
+                .map(|(i, bit)| bit.map(|b| if b { 1 << i } else { 0 }))
+                .fold(Some(0), |acc, bit| match (acc, bit) {
+                    (Some(acc), Some(bit)) => Some(acc + bit),
+                    _ => None,
+                });
+
+            num.ok_or_else(|| SynthesisError::Unsatisfiable)
+        };
+
+        let from = convert_to_num(&bits[0..16])?;
+        if from >= 8 {
+            return Err(SynthesisError::Violation);
+        }
+
+        let to = convert_to_num(&bits[16..32])?;
+        if to >= 8 {
+            return Err(SynthesisError::Violation);
+        }
+
         let amount = bits_to_num(cs.namespace(|| "tx amount"), &bits[32..8 * (4 + 16)])?;
 
         Ok(CTransaction { from, to, amount })
@@ -130,6 +170,7 @@ struct CChainState<F: Field> {
     height: AllocatedNum<F>,        // 8 * 8
     root_hash: Vec<Boolean>,        // 32 * 8
     balances: Vec<AllocatedNum<F>>, // 8 * 8 * 16
+    balances_bits: Vec<Vec<Boolean>>,
     tx: Option<CTransaction<F>>,
 }
 
@@ -146,6 +187,10 @@ impl<F: Field> CChainState<F> {
             .chunks(8 * 16)
             .map(|balance_bits| bits_to_num(cs.namespace(|| "balance"), &balance_bits))
             .collect::<Result<Vec<_>, _>>()?;
+        let balances_bits = bits[(8 * 8 + 8 * 32)..(8 * 8 + 8 * 32 + 8 * 8 * 16)]
+            .chunks(8 * 16)
+            .map(|bits| bits.to_vec())
+            .collect::<Vec<Vec<Boolean>>>();
 
         let tx_bits = &bits[(8 * 32 + 8 * 8 * 16)..];
         let mut tx = None;
@@ -157,10 +202,51 @@ impl<F: Field> CChainState<F> {
             height,
             root_hash,
             balances,
+            balances_bits,
             tx,
         };
 
         Ok(chain_state)
+    }
+
+    fn hash_leaf<CS: ConstraintSystem<F>>(
+        cs: CS,
+        left: &Vec<Boolean>,
+        right: &Vec<Boolean>,
+    ) -> Result<Vec<Boolean>, SynthesisError> {
+        let mut combined = left.clone();
+        combined.extend(right.clone());
+
+        sha256(cs, &combined)
+    }
+
+    fn merkle_root_hash<CS: ConstraintSystem<F>>(
+        &self,
+        mut cs: CS,
+    ) -> Result<Vec<Boolean>, SynthesisError> {
+        let leaf_hashes = self
+            .balances_bits
+            .iter()
+            .map(|balance| sha256(cs.namespace(|| "hash(balance)"), &balance))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let mut root_hash = leaf_hashes;
+        while root_hash.len() > 1 {
+            root_hash = root_hash
+                .chunks(2)
+                .map(|left_right| {
+                    Self::hash_leaf(
+                        cs.namespace(|| "merkle hash"),
+                        &left_right[0],
+                        &left_right[1],
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+        }
+
+        Ok(root_hash
+            .pop()
+            .ok_or_else(|| SynthesisError::Unsatisfiable)?)
     }
 }
 
@@ -192,6 +278,43 @@ impl<F: Field> RecursiveCircuit<F> for ReachCircuit {
 
         cs.enforce_zero(curr_state.height.lc() - &prev_state.height.lc() - CS::ONE);
 
-        todo!()
+        let prev_root_hash = prev_state.merkle_root_hash(cs.namespace(|| "previous root hash"))?;
+        enforce_equality(
+            cs.namespace(|| "match previous root hash"),
+            &prev_state.root_hash,
+            &prev_root_hash,
+        );
+
+        let curr_root_hash = curr_state.merkle_root_hash(cs.namespace(|| "current root hash"))?;
+        enforce_equality(
+            cs.namespace(|| "match current root hash"),
+            &curr_state.root_hash,
+            &curr_root_hash,
+        );
+
+        let tx = curr_state.tx.ok_or_else(|| SynthesisError::Unsatisfiable)?;
+        if tx.from == tx.to {
+            // Mint
+            cs.enforce_zero(
+                curr_state.balances[tx.to as usize].lc()
+                    - &prev_state.balances[tx.to as usize].lc()
+                    - &tx.amount.lc(),
+            );
+        } else {
+            // Transfer
+            cs.enforce_zero(
+                prev_state.balances[tx.from as usize].lc()
+                    - &curr_state.balances[tx.from as usize].lc()
+                    - &tx.amount.lc(),
+            );
+
+            cs.enforce_zero(
+                curr_state.balances[tx.to as usize].lc()
+                    - &prev_state.balances[tx.to as usize].lc()
+                    - &tx.amount.lc(),
+            );
+        }
+
+        Ok(())
     }
 }
