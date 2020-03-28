@@ -1,14 +1,14 @@
-use bellman_ce::{
-    groth16,
-    pairing::{bls12_381::Bls12, Engine},
-    Circuit, ConstraintSystem, SynthesisError,
+use bellman::{
+    gadgets::{
+        boolean::{AllocatedBit, Boolean},
+        multipack,
+        sha256::sha256,
+    },
+    groth16, Circuit, ConstraintSystem, SynthesisError,
 };
-use rand::os::OsRng;
-use sapling_crypto_ce::circuit::{
-    boolean::{AllocatedBit, Boolean},
-    multipack,
-    sha256::sha256,
-};
+use pairing::bls12_381::Bls12;
+use pairing::Engine;
+use rand::rngs::OsRng;
 use sha2::{Digest, Sha256};
 
 fn convert_to_bits(num: u128) -> Vec<bool> {
@@ -83,8 +83,6 @@ fn combine(amount: u128, nonce: u128) -> [u8; 32] {
 }
 
 pub fn main() {
-    let mut os_rng = OsRng::new().expect("os rng");
-
     let params = {
         let c = Zk42 {
             input_amount: 0,
@@ -92,7 +90,7 @@ pub fn main() {
             output_amount: 0,
             output_nonce: 0,
         };
-        groth16::generate_random_parameters::<Bls12, _, _>(c, &mut os_rng).expect("setup")
+        groth16::generate_random_parameters::<Bls12, _, _>(c, &mut OsRng).expect("setup")
     };
 
     let c = Zk42 {
@@ -109,7 +107,7 @@ pub fn main() {
     let inputs = multipack::compute_multipacking::<Bls12>(&hash_bits);
 
     let vk = groth16::prepare_verifying_key(&params.vk);
-    let proof = groth16::create_random_proof(c, &params, &mut os_rng).expect("create proof");
+    let proof = groth16::create_random_proof(c, &params, &mut OsRng).expect("create proof");
 
     assert!(groth16::verify_proof(&vk, &proof, &inputs).expect("verify"));
 }
