@@ -122,12 +122,17 @@ impl<E: Engine> Params<E> {
     }
 }
 
-pub fn trust_setup() -> Params<Bls12> {
+pub fn trust_setup(inputs_size: u8, outputs_size: u8) -> Params<Bls12> {
     let params = {
         let c = Mixer {
-            inputs: vec![],
-            outputs: vec![],
+            inputs: (0..inputs_size)
+                .map(|_| Amount::new(254, 1))
+                .collect::<Vec<_>>(),
+            outputs: (0..outputs_size)
+                .map(|_| Amount::new(1, 1))
+                .collect::<Vec<_>>(),
         };
+
         groth16::generate_random_parameters::<Bls12, _, _>(c, &mut OsRng).expect("setup")
     };
 
@@ -213,15 +218,18 @@ mod tests {
 
     #[test]
     fn basic_test() {
-        let params = trust_setup();
+        let params = trust_setup(2, 1); // Support up to 2 inputs and 1 outputs
+        println!("complete trust setup");
+
         let witness = Witness {
             inputs: vec![Amount::new(1, 1), Amount::new(2, 2)],
-            outputs: vec![Amount::new(1, 2), Amount::new(2, 3)],
+            outputs: vec![Amount::new(3, 2)],
         };
 
         let proof = generate_proof(witness, &params.to_bytes());
+        println!("complete generate proof");
 
-        let amounts = vec![combine(1, 1), combine(2, 2), combine(1, 2), combine(2, 3)];
+        let amounts = vec![combine(1, 1), combine(2, 2), combine(3, 2)];
 
         let amount_hashes = amounts
             .into_iter()
@@ -234,6 +242,7 @@ mod tests {
         });
 
         let input = Input { recursive_hash };
+        println!("complete input");
 
         assert!(verify(&params.verifying_key(), &proof.to_bytes(), input))
     }
