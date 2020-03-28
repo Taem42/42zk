@@ -7,37 +7,21 @@ struct Leaf {
     balance: u128,
 }
 
-fn append(one: Sha256Digest, two: Sha256Digest) -> Sha256Digest {
-    let mut data = [false; 512];
-    data[0..256] = one;
-    data[256..512] = two[0..256];
-    sha256(data)
-}
-
 fn leaf_hash(leaf: Leaf) -> Sha256Digest {
     let pk_bits = std::convert::to_bits(leaf.pub_key);
     let pk_pads = std::array::pad(pk_bits, 256, false);
     let blc_bits = std::convert::to_bits(leaf.balance);
     let blc_pads = std::array::pad(blc_bits, 512, false);
-    // let one = sha256(pk_pads);
-    // let two = sha256(blc_pads);
     
     let mut data = [false; 768];
-    for i in 0 as u16..768 {
-        data[i] = if i < 256 {
-            pk_pads[i]
-        } else {
-            blc_pads[i - 256]
-        };
+    for i in 0 as u16..256 {
+        data[i] = pk_pads[i];
+    }
+    for j in 0 as u16..512 {
+        data[j + 256] = blc_pads[j];
     }
     sha256(data)    
 }
-
-// fn convert_node_to_sha256(addr: u16) -> Sha256Digest {
-//     let bits = std::convert::to_bits(addr);
-//     let bits_padded = std::array::pad(bits, 256, false);
-//     sha256(bits_padded)
-// }
 
 fn generate_account(from: u16, to: u16, balance_list: [u128; 8], amount: u128) -> [u128; 8] {
     let mut ret = [0 as u128; 8];
@@ -58,16 +42,25 @@ fn generate_account(from: u16, to: u16, balance_list: [u128; 8], amount: u128) -
     ret
 }
 
+fn cal_merkle_leaf(index: u16, amount: u128) -> Sha256Digest {
+    let leaf = Leaf {
+        pub_key: index,
+        balance: amount,
+    };
+    leaf_hash(leaf)
+}
+
 fn generate_merkle_leaves(accounts: [u128; 8]) -> [Sha256Digest; 8] {
-    let mut ret = [[false; 256]; 8];
-    for i in 0 as u16..8 {
-        let leaf = Leaf {
-            pub_key: i,
-            balance: accounts[i],
-        };
-        ret[i] = leaf_hash(leaf);
-    }
-    ret
+    [
+        cal_merkle_leaf(0 as u16, accounts[0]),
+        cal_merkle_leaf(1 as u16, accounts[1]),
+        cal_merkle_leaf(2 as u16, accounts[2]),
+        cal_merkle_leaf(3 as u16, accounts[3]),
+        cal_merkle_leaf(4 as u16, accounts[4]),
+        cal_merkle_leaf(5 as u16, accounts[5]),
+        cal_merkle_leaf(6 as u16, accounts[6]),
+        cal_merkle_leaf(7 as u16, accounts[7]),
+    ]
 }
 
 fn merkle_node_hash(left: Sha256Digest, right: Sha256Digest) -> Sha256Digest {
@@ -80,12 +73,6 @@ fn merkle_node_hash(left: Sha256Digest, right: Sha256Digest) -> Sha256Digest {
 
     sha256(data)
 }
-
-// fn cal_root_hash(data: [Sha256Digest; 4]) -> Sha256Digest {
-//     let left = merkle_node_hash(data[0], data[1]);
-//     let right = merkle_node_hash(data[2], data[3]);
-//     merkle_node_hash(left, right)
-// }
 
 fn restore_root_hash(
     path: [Sha256Digest; 8],

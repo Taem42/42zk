@@ -44,7 +44,7 @@ type Sha256Digest = [bool; 256];
 // }
 
 struct PublicInput {
-    root_hash: merkle::Sha256Digest, // use a type declaration from `merkle`
+    root_hash: merkle::Sha256Digest, 
 }
 
 
@@ -53,7 +53,7 @@ fn main(
     to: u16,
     amount: u128,
     balance_list: [u128; 8],
-    merkle_path: [Sha256Digest; 8] // undeclared `Sha256Digest`
+    merkle_path: [Sha256Digest; 8]
 ) -> PublicInput {
     assert!(from < 8 as u16);
     assert!(to < 8 as u16);
